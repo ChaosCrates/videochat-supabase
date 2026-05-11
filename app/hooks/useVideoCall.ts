@@ -20,14 +20,18 @@ export function useVideoCall(currentUserId: string | null) {
 
     pc.ontrack = (event) => {
       setRemoteStream(event.streams[0]);
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      }
     };
 
     pc.onicecandidate = (event) => {
       if (event.candidate && incomingCall?.id) {
         supabase
           .from('calls')
-          .update({ ice_candidates: [...(incomingCall.ice_candidates || []), event.candidate] })
+          .update({
+            ice_candidates: [...(incomingCall.ice_candidates || []), event.candidate]
+          })
           .eq('id', incomingCall.id);
       }
     };
@@ -37,22 +41,28 @@ export function useVideoCall(currentUserId: string | null) {
 
   const startLocalStream = async () => {
     try {
-      localStream.current = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      if (localVideoRef.current) localVideoRef.current.srcObject = localStream.current;
+      localStream.current = await navigator.mediaDevices.getUserMedia({ 
+        video: true, 
+        audio: true 
+      });
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream.current;
+      }
     } catch (err) {
-      console.error(err);
-      alert("Please allow camera and microphone");
+      console.error("Media access error:", err);
+      alert("Please allow camera and microphone access");
     }
   };
 
   const callUser = async (calleeId: string) => {
     if (!currentUserId) return;
+    
     await startLocalStream();
     peerConnection.current = createPeerConnection();
 
-    localStream.current?.getTracks().forEach(track => 
-      peerConnection.current?.addTrack(track, localStream.current!)
-    );
+    localStream.current?.getTracks().forEach(track => {
+      peerConnection.current?.addTrack(track, localStream.current!);
+    });
 
     const offer = await peerConnection.current!.createOffer();
     await peerConnection.current!.setLocalDescription(offer);
@@ -68,11 +78,12 @@ export function useVideoCall(currentUserId: string | null) {
   const acceptCall = async (call: any) => {
     setIncomingCall(null);
     await startLocalStream();
+    
     peerConnection.current = createPeerConnection();
-
-    localStream.current?.getTracks().forEach(track => 
-      peerConnection.current?.addTrack(track, localStream.current!)
-    );
+    
+    localStream.current?.getTracks().forEach(track => {
+      peerConnection.current?.addTrack(track, localStream.current!);
+    });
 
     await peerConnection.current!.setRemoteDescription(new RTCSessionDescription(call.sdp_offer));
     const answer = await peerConnection.current!.createAnswer();
@@ -93,33 +104,49 @@ export function useVideoCall(currentUserId: string | null) {
 
   const endCall = () => {
     peerConnection.current?.close();
-    localStream.current?.getTracks().forEach(t => t.stop());
+    localStream.current?.getTracks().forEach(track => track.stop());
     setIsCallActive(false);
+    setRemoteStream(null);
   };
 
-  // Listen for incoming calls
+  // Listen for incoming calls - FIXED for Netlify/TypeScript
   useEffect(() => {
     if (!currentUserId) return;
 
     const channel = supabase.channel(`incoming-${currentUserId}`);
 
-    channel.on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'calls', filter: `callee_id=eq.${currentUserId}` },
-      async (payload) => {
-        if (payload.new.status === 'ringing') {
-          const { data: caller } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', payload.new.caller_id)
-            .single();
-          
-          setIncomingCall({ ...payload.new, caller: caller || { username: 'Someone' } });
+    channel
+      .on(
+        'postgres_changes',
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'calls', 
+          filter: `callee_id=eq.${currentUserId}` 
+        },
+        async (payload) => {
+          if (payload.new.status === 'ringing') {
+            const { data: caller } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', payload.new.caller_id)
+              .single();
+            
+            setIncomingCall({ 
+              ...payload.new, 
+              caller: caller || { username: 'Someone' } 
+            });
+          }
         }
-      }
-    ).subscribe();
+      )
+      .subscribe();
 
-    return () => channel.unsubscribe();
+    // Clean up function (must be synchronous)
+    return () => {
+      channel.unsubscribe().catch((err) => {
+        console.warn('Error unsubscribing from channel:', err);
+      });
+    };
   }, [currentUserId]);
 
   return {
