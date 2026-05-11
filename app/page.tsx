@@ -21,8 +21,9 @@ export default function VideoChatApp() {
   // Auth
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-      if (data.session?.user) setMyUserId(data.session.user.id);
+      const currentUser = data.session?.user;
+      setUser(currentUser);
+      if (currentUser) setMyUserId(currentUser.id);
       setLoading(false);
     });
 
@@ -35,45 +36,47 @@ export default function VideoChatApp() {
   }, []);
 
   // Load Friends
-  useEffect(() => {
+  const loadFriends = async () => {
     if (!user) return;
+    
+    const { data, error } = await supabase
+      .from('friends')
+      .select(`
+        *,
+        friend_profile:profiles!friend_id (username, full_name, avatar_url)
+      `)
+      .eq('user_id', user.id)
+      .eq('status', 'accepted');
 
-    const loadFriends = async () => {
-      const { data } = await supabase
-        .from('friends')
-        .select(`
-          *,
-          friend_profile:profiles!friend_id (username, full_name, avatar_url)
-        `)
-        .eq('user_id', user.id)
-        .eq('status', 'accepted');
+    if (error) console.error(error);
+    setFriends(data || []);
+  };
 
-      setFriends(data || []);
-    };
-
+  useEffect(() => {
     loadFriends();
   }, [user]);
 
   const addFriend = async () => {
-    if (!searchId || searchId === user?.id) return alert("Enter a valid User ID");
+    if (!searchId || !user) return alert("Please enter User ID");
 
     const { error } = await supabase
       .from('friends')
       .insert({
         user_id: user.id,
         friend_id: searchId,
-        status: 'accepted'        // ← This makes it instant
+        status: 'accepted'
       });
 
     if (error) {
-      alert("Failed to add friend: " + error.message);
+      alert("Error: " + error.message);
     } else {
-      alert("✅ Friend added successfully!");
+      alert("✅ Friend added!");
       setSearchId('');
+      loadFriends();        // ← This forces refresh
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-white text-2xl">Loading...</div>;
+  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-2xl text-white">Loading...</div>;
 
   if (!user) {
     return <div className="min-h-screen bg-zinc-950 flex items-center justify-center">Login Screen...</div>;
@@ -112,20 +115,21 @@ export default function VideoChatApp() {
           
           <div className="space-y-3 flex-1 overflow-auto">
             {friends.length === 0 && (
-              <p className="text-zinc-500">No friends yet. Add someone using their User ID.</p>
+              <p className="text-zinc-500 italic">No friends yet. Add someone using their User ID above.</p>
             )}
-            {friends.map((friend) => (
-              <div key={friend.id} className="flex items-center justify-between bg-zinc-900 p-4 rounded-2xl">
+            
+            {friends.map((f) => (
+              <div key={f.id} className="flex items-center justify-between bg-zinc-900 p-4 rounded-2xl">
                 <div className="flex items-center gap-3">
                   <Avatar>
-                    <AvatarFallback>{friend.friend_profile?.username?.[0] || '?'}</AvatarFallback>
+                    <AvatarFallback>{f.friend_profile?.username?.[0] || 'U'}</AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium">{friend.friend_profile?.full_name || friend.friend_profile?.username}</p>
+                    <p className="font-medium">{f.friend_profile?.full_name || f.friend_profile?.username || 'User'}</p>
                   </div>
                 </div>
-                <Button onClick={() => callUser(friend.friend_id)}>
-                  <Phone className="w-5 h-5" />
+                <Button onClick={() => callUser(f.friend_id)}>
+                  <Phone />
                 </Button>
               </div>
             ))}
@@ -136,18 +140,12 @@ export default function VideoChatApp() {
         <div className="flex-1 flex items-center justify-center bg-black">
           <div className="text-center">
             <h1 className="text-6xl font-bold mb-6">VideoChat</h1>
-            <p className="text-zinc-400">Select a friend from the sidebar to call or chat</p>
+            <p className="text-xl text-zinc-400">Your friends appear here after you add them</p>
           </div>
         </div>
       </div>
 
-      {incomingCall && (
-        <IncomingCall 
-          caller={incomingCall.caller} 
-          onAccept={() => acceptCall(incomingCall)} 
-          onReject={() => rejectCall(incomingCall.id)} 
-        />
-      )}
+      {incomingCall && <IncomingCall caller={incomingCall.caller} onAccept={() => acceptCall(incomingCall)} onReject={() => rejectCall(incomingCall.id)} />}
     </div>
   );
 }
