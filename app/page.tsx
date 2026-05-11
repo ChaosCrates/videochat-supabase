@@ -7,7 +7,7 @@ import IncomingCall from './components/IncomingCall';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Phone, LogOut, UserPlus } from 'lucide-react';
+import { Phone, LogOut, UserPlus, RefreshCw } from 'lucide-react';
 
 export default function VideoChatApp() {
   const [user, setUser] = useState<any>(null);
@@ -15,15 +15,14 @@ export default function VideoChatApp() {
   const [searchId, setSearchId] = useState('');
   const [myUserId, setMyUserId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const { callUser, acceptCall, rejectCall, endCall, incomingCall, isCallActive, localVideoRef, remoteVideoRef } = useVideoCall(user?.id);
+  const { callUser, acceptCall, rejectCall, endCall, incomingCall, isCallActive } = useVideoCall(user?.id);
 
-  // Auth
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      const currentUser = data.session?.user;
-      setUser(currentUser);
-      if (currentUser) setMyUserId(currentUser.id);
+      setUser(data.session?.user ?? null);
+      if (data.session?.user) setMyUserId(data.session.user.id);
       setLoading(false);
     });
 
@@ -35,21 +34,22 @@ export default function VideoChatApp() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  // Load Friends
   const loadFriends = async () => {
     if (!user) return;
-    
+    setRefreshing(true);
+
     const { data, error } = await supabase
       .from('friends')
       .select(`
         *,
-        friend_profile:profiles!friend_id (username, full_name, avatar_url)
+        friend_profile:profiles!friend_id (username, full_name)
       `)
       .eq('user_id', user.id)
       .eq('status', 'accepted');
 
-    if (error) console.error(error);
+    if (error) console.error("Friends error:", error);
     setFriends(data || []);
+    setRefreshing(false);
   };
 
   useEffect(() => {
@@ -57,7 +57,7 @@ export default function VideoChatApp() {
   }, [user]);
 
   const addFriend = async () => {
-    if (!searchId || !user) return alert("Please enter User ID");
+    if (!searchId || !user) return alert("Enter User ID");
 
     const { error } = await supabase
       .from('friends')
@@ -70,22 +70,19 @@ export default function VideoChatApp() {
     if (error) {
       alert("Error: " + error.message);
     } else {
-      alert("✅ Friend added!");
+      alert("✅ Friend added! Refreshing list...");
       setSearchId('');
-      loadFriends();        // ← This forces refresh
+      loadFriends();   // Force refresh
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-2xl text-white">Loading...</div>;
+  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-white text-2xl">Loading...</div>;
 
-  if (!user) {
-    return <div className="min-h-screen bg-zinc-950 flex items-center justify-center">Login Screen...</div>;
-  }
+  if (!user) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center">Login Screen...</div>;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="flex h-screen">
-        {/* Sidebar */}
         <div className="w-96 border-r border-zinc-800 p-6 flex flex-col">
           <div className="flex justify-between items-center mb-8">
             <h1 className="text-2xl font-bold">VideoChat</h1>
@@ -102,30 +99,34 @@ export default function VideoChatApp() {
           <h2 className="font-semibold mb-3">Add Friend</h2>
           <div className="flex gap-2 mb-8">
             <Input 
-              placeholder="Paste User ID here" 
+              placeholder="Paste User ID" 
               value={searchId} 
               onChange={(e) => setSearchId(e.target.value)} 
             />
-            <Button onClick={addFriend}>
-              <UserPlus />
+            <Button onClick={addFriend}><UserPlus /></Button>
+          </div>
+
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold">My Friends ({friends.length})</h2>
+            <Button variant="ghost" size="sm" onClick={loadFriends} disabled={refreshing}>
+              <RefreshCw className={refreshing ? "animate-spin" : ""} />
             </Button>
           </div>
 
-          <h2 className="font-semibold mb-4">My Friends ({friends.length})</h2>
-          
           <div className="space-y-3 flex-1 overflow-auto">
             {friends.length === 0 && (
-              <p className="text-zinc-500 italic">No friends yet. Add someone using their User ID above.</p>
+              <p className="text-zinc-500">No friends yet.<br />Add someone using their User ID.</p>
             )}
-            
-            {friends.map((f) => (
+
+            {friends.map((f: any) => (
               <div key={f.id} className="flex items-center justify-between bg-zinc-900 p-4 rounded-2xl">
                 <div className="flex items-center gap-3">
                   <Avatar>
-                    <AvatarFallback>{f.friend_profile?.username?.[0] || 'U'}</AvatarFallback>
+                    <AvatarFallback>{f.friend_profile?.username?.[0] || '?'}</AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="font-medium">{f.friend_profile?.full_name || f.friend_profile?.username || 'User'}</p>
+                    <p className="font-medium">{f.friend_profile?.full_name || 'User'}</p>
+                    <p className="text-xs text-zinc-500">@{f.friend_profile?.username}</p>
                   </div>
                 </div>
                 <Button onClick={() => callUser(f.friend_id)}>
@@ -136,11 +137,10 @@ export default function VideoChatApp() {
           </div>
         </div>
 
-        {/* Main Area */}
         <div className="flex-1 flex items-center justify-center bg-black">
           <div className="text-center">
-            <h1 className="text-6xl font-bold mb-6">VideoChat</h1>
-            <p className="text-xl text-zinc-400">Your friends appear here after you add them</p>
+            <h1 className="text-6xl font-bold mb-4">VideoChat</h1>
+            <p className="text-zinc-400">Add friends to start calling</p>
           </div>
         </div>
       </div>
