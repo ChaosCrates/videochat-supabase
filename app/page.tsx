@@ -7,7 +7,7 @@ import IncomingCall from './components/IncomingCall';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Phone, LogOut, UserPlus, RefreshCw } from 'lucide-react';
+import { Phone, LogOut, UserPlus, Copy, RefreshCw } from 'lucide-react';
 
 export default function VideoChatApp() {
   const [user, setUser] = useState<any>(null);
@@ -15,26 +15,32 @@ export default function VideoChatApp() {
   const [searchId, setSearchId] = useState('');
   const [myUserId, setMyUserId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const { callUser, acceptCall, rejectCall, endCall, incomingCall } = useVideoCall(user?.id);
+  const { callUser, acceptCall, rejectCall, endCall, incomingCall, isCallActive, localVideoRef, remoteVideoRef } = useVideoCall(user?.id);
 
+  // Auth
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-      if (data.session?.user) setMyUserId(data.session.user.id);
+      const u = data.session?.user;
+      setUser(u);
+      if (u) setMyUserId(u.id);
       setLoading(false);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) setMyUserId(session.user.id);
+      const u = session?.user;
+      setUser(u);
+      if (u) setMyUserId(u.id);
     });
 
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  // Load Friends
   const loadFriends = async () => {
     if (!user) return;
+    setRefreshing(true);
 
     const { data } = await supabase
       .from('friends')
@@ -43,14 +49,20 @@ export default function VideoChatApp() {
       .eq('status', 'accepted');
 
     setFriends(data || []);
+    setRefreshing(false);
   };
 
   useEffect(() => {
     loadFriends();
   }, [user]);
 
+  const copyUserId = () => {
+    navigator.clipboard.writeText(myUserId);
+    alert("✅ User ID copied to clipboard!");
+  };
+
   const addFriend = async () => {
-    if (!searchId || !user) return alert("Enter User ID");
+    if (!searchId || !user) return alert("Enter a User ID");
 
     const { error } = await supabase
       .from('friends')
@@ -60,50 +72,75 @@ export default function VideoChatApp() {
         status: 'accepted'
       });
 
-    if (error) alert(error.message);
-    else {
-      alert("✅ Added! Refreshing...");
+    if (error) {
+      alert("Error: " + error.message);
+    } else {
+      alert("✅ Friend added successfully!");
       setSearchId('');
-      loadFriends();
+      loadFriends();        // Refresh list
     }
   };
 
-  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-white">Loading...</div>;
-  if (!user) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center">Please log in</div>;
+  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-2xl">Loading...</div>;
+
+  if (!user) {
+    return <div className="min-h-screen bg-zinc-950 flex items-center justify-center">Login Screen...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
       <div className="flex h-screen">
+        {/* Sidebar */}
         <div className="w-96 border-r border-zinc-800 p-6 flex flex-col">
-          <div className="flex justify-between mb-8">
-            <h1 className="text-2xl font-bold">VideoChat</h1>
-            <Button variant="ghost" onClick={() => supabase.auth.signOut()}>Logout</Button>
+          <div className="flex justify-between items-center mb-8">
+            <h1 className="text-3xl font-bold">VideoChat</h1>
+            <Button variant="ghost" onClick={() => supabase.auth.signOut()}>
+              <LogOut />
+            </Button>
           </div>
 
-          <div className="bg-zinc-900 p-4 rounded-2xl mb-6">
-            <p className="text-xs text-zinc-500">YOUR ID</p>
-            <p className="font-mono break-all">{myUserId}</p>
+          {/* COPY USER ID SECTION */}
+          <div className="bg-zinc-900 p-5 rounded-2xl mb-8">
+            <p className="text-sm text-zinc-400 mb-2">YOUR USER ID (Share this)</p>
+            <div className="flex gap-2">
+              <p className="font-mono text-sm break-all flex-1 bg-black p-3 rounded">{myUserId}</p>
+              <Button onClick={copyUserId} variant="outline">
+                <Copy size={18} />
+              </Button>
+            </div>
           </div>
 
+          {/* ADD FRIEND SECTION */}
           <h2 className="font-semibold mb-3">Add Friend</h2>
           <div className="flex gap-2 mb-8">
-            <Input placeholder="User ID" value={searchId} onChange={(e) => setSearchId(e.target.value)} />
-            <Button onClick={addFriend}><UserPlus /></Button>
+            <Input 
+              placeholder="Paste Friend's User ID here" 
+              value={searchId} 
+              onChange={(e) => setSearchId(e.target.value)} 
+            />
+            <Button onClick={addFriend}>
+              <UserPlus />
+            </Button>
           </div>
 
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="font-semibold">Friends ({friends.length})</h2>
-            <Button variant="ghost" size="sm" onClick={loadFriends}><RefreshCw /></Button>
+          {/* FRIENDS LIST */}
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold">My Friends ({friends.length})</h2>
+            <Button variant="ghost" size="sm" onClick={loadFriends} disabled={refreshing}>
+              <RefreshCw className={refreshing ? "animate-spin" : ""} size={18} />
+            </Button>
           </div>
 
-          <div className="space-y-3">
-            {friends.length === 0 && <p className="text-zinc-500">No friends found yet.</p>}
+          <div className="space-y-3 flex-1 overflow-auto">
+            {friends.length === 0 && (
+              <p className="text-zinc-500">No friends yet.<br />Add them using their User ID above.</p>
+            )}
 
             {friends.map((f) => (
               <div key={f.id} className="bg-zinc-900 p-4 rounded-2xl flex justify-between items-center">
                 <div>
-                  <p>Friend ID:</p>
-                  <p className="font-mono text-sm text-zinc-400">{f.friend_id}</p>
+                  <p className="font-medium">Friend</p>
+                  <p className="font-mono text-xs text-zinc-500">{f.friend_id}</p>
                 </div>
                 <Button onClick={() => callUser(f.friend_id)}>
                   <Phone />
@@ -113,8 +150,12 @@ export default function VideoChatApp() {
           </div>
         </div>
 
-        <div className="flex-1 flex items-center justify-center bg-black">
-          <h1 className="text-5xl font-bold text-zinc-600">VideoChat</h1>
+        {/* Main Area */}
+        <div className="flex-1 flex items-center justify-center bg-black relative">
+          <div className="text-center">
+            <h1 className="text-6xl font-bold mb-6">VideoChat</h1>
+            <p className="text-zinc-400">Add friends using their User ID</p>
+          </div>
         </div>
       </div>
 
